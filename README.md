@@ -23,6 +23,7 @@ StarResonanceTool.exe [options]
 | `-d, --dll <path>` | Path to DummyDll directory |
 | `-a, --assetbundles` | Extract asset bundles (default: skip) |
 | `--all` | Process all entries (processes everything in the PKG file) |
+| `-l, --lang <langs>` | Comma-separated languages for the tables: `english`, `chinese`, `japanese`, `korean` or `all` (default: `english`) |
 
 ### Examples
 
@@ -36,18 +37,29 @@ StarResonanceTool.exe --pkg "C:\game\meta.pkg" --dll "C:\Il2CppDumper\DummyDll" 
 StarResonanceTool.exe --all --assetbundles --dll "C:\Il2CppDumper\DummyDll" --output "C:\full_extraction"
 ```
 
+**Extract everything with the tables in all four languages:**
+```bash
+StarResonanceTool.exe --pkg "C:\game\meta.pkg" --all --assetbundles --lang all --dll "C:\Il2CppDumper\DummyDll" --output "C:\full_extraction"
+```
+
 ### Output Structure
 
 The tool creates the following directory structure in the output folder:
 
 ```
-ZTable/          # Parsed basic game data (.json files)
 output/
-├── Bundles/     # Asset bundles (.ab files) - only if --assetbundles is used
-├── Lua/         # Lua scripts (.luac files)
-├── Unk/         # Other data files (.bin files)
-└── Proto/       # Protocol buffer schemas (generated automatically)
+├── Bundles/     # Asset bundles (.ab files) - only if --all and --assetbundles are used
+├── Lua/         # Lua scripts (.luac files) - only if --all is used
+├── Proto/       # Protocol buffer schemas - only if --all is used
+├── Unk/         # Other data files (.bin files) - only if --all is used
+└── Ztable/      # Parsed basic game data (.json files), one folder per language given to --lang
+    ├── en/ZTable/
+    ├── cn/ZTable/
+    ├── jp/ZTable/
+    └── kr/ZTable/
 ```
+
+Files that already exist in `Bundles/` and `Unk/` are skipped, not overwritten. When extracting a newer game version into the same output folder, delete `Bundles/` and `Unk/` first. `Ztable/`, `Lua/` and `Proto/` are overwritten.
 
 ### File Types Processed
 

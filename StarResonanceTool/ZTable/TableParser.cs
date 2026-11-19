@@ -11,9 +11,7 @@ using static StarResonanceTool.PkgEntryReader.Program;
 
 internal class TableParser
 {
-	private static readonly string outDir = "ZTable";
-
-	public void ParseFromName(string name, TypeDefinition targetType)
+	public void ParseFromName(string name, TypeDefinition targetType, string outDir)
 	{
 		uint hash = HashModule.Hash33(name + ".ctb");
 

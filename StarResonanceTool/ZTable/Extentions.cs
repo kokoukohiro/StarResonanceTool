@@ -10,6 +10,9 @@ internal static class ReaderExtensions
 {
 	private static Dictionary<int, int>? _locIndex;
 
+	/// <summary>Drops the cached localization index so the next lookup rebuilds it from the language loaded last.</summary>
+	public static void ResetLocalizationIndex() => _locIndex = null;
+
 	public static string ReadString(this ZMemory_SpanReader_o reader, BokuraTableLoader loader)
 	{
 		int index = reader.ReadInt32();

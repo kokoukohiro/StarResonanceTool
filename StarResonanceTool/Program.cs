@@ -22,6 +22,7 @@ internal class Config
 	public string DummyDllPath { get; set; } = String.Empty;
 	public bool ExtractAssetBundles { get; set; } = false;
 	public bool ProcessAllEntries { get; set; } = false;
+	public List<string> Languages { get; set; } = [];
 }
 
 internal class MainApp
@@ -29,7 +30,14 @@ internal class MainApp
 	public static Dictionary<uint, PkgEntry> entries = new Dictionary<uint, PkgEntry>();
 	public static string containerPath = string.Empty;
 
-	public static string defaultlang = "english"; // can change to chinese
+	// Localization file name (<name>.bytes) -> folder name under Ztable/
+	public static readonly Dictionary<string, string> LanguageFolders = new()
+	{
+		["english"] = "en",
+		["chinese"] = "cn",
+		["japanese"] = "jp",
+		["korean"] = "kr",
+	};
 
 	public static KeyValuePair<int, int>[] Indexes = [];
 	public static string[] AllLocalizationStrings = [];
@@ -58,6 +66,7 @@ internal class MainApp
 		Console.WriteLine($"  DummyDll Directory: {dummyDllPath}");
 		Console.WriteLine($"  Extract Asset Bundles: {config.ExtractAssetBundles}");
 		Console.WriteLine($"  Process All Entries: {config.ProcessAllEntries}");
+		Console.WriteLine($"  Languages: {string.Join(", ", config.Languages)}");
 		Console.WriteLine();
 
 		// Validate paths
@@ -90,20 +99,38 @@ internal class MainApp
 		ModuleDefinition metaData = AssemblyDefinition.ReadAssembly(Path.Combine(dummyDllPath, "Panda.Table.dll"), readerParams).MainModule;
 		TypeDefinition LoaderType = metaData.GetType("Panda.TableInitUtility").NestedTypes.First(t => t.Name == "<>c");
 
-		byte[] cnBytes = ReadFromEntry(entries[HashModule.Hash33($"{defaultlang}.bytes")]);
-		LoadLocalizationFromStream(new MemoryStream(cnBytes));
-
-		foreach (MethodDefinition method in LoaderType.Methods)
+		// Check every localization file before writing any table, so a missing one stops the run before output starts
+		var localizationEntries = new List<(string Language, PkgEntry Entry)>();
+		foreach (string language in config.Languages)
 		{
-			if (!method.IsAssembly)
-				continue;
-			//	continue;
-			TableParser parser = new TableParser();
-			string tableName = string.Join("", method.ReturnType.Name.SkipLast(4));
-			TypeDefinition targetType = method.ReturnType.Resolve();
-			//if (tableName != "MonsterTable")
-			//	continue;
-			parser.ParseFromName(tableName, targetType);
+			if (!entries.TryGetValue(HashModule.Hash33($"{language}.bytes"), out PkgEntry localizationEntry))
+			{
+				Console.Error.WriteLine($"Error: Localization file not found: {language}.bytes");
+				return;
+			}
+			localizationEntries.Add((language, localizationEntry));
+		}
+
+		foreach (var (language, localizationEntry) in localizationEntries)
+		{
+			LoadLocalizationFromStream(new MemoryStream(ReadFromEntry(localizationEntry)));
+			ReaderExtensions.ResetLocalizationIndex();
+
+			string tableDir = Path.Combine(basePath, "Ztable", LanguageFolders[language], "ZTable");
+			Console.WriteLine($"Parsing tables for '{language}' into {tableDir}...");
+
+			foreach (MethodDefinition method in LoaderType.Methods)
+			{
+				if (!method.IsAssembly)
+					continue;
+				//	continue;
+				TableParser parser = new TableParser();
+				string tableName = string.Join("", method.ReturnType.Name.SkipLast(4));
+				TypeDefinition targetType = method.ReturnType.Resolve();
+				//if (tableName != "MonsterTable")
+				//	continue;
+				parser.ParseFromName(tableName, targetType, tableDir);
+			}
 		}
 
 		Directory.CreateDirectory(Path.Combine(basePath, "Bundles"));
@@ -140,7 +167,7 @@ internal class MainApp
 				outputPath = Path.Combine(basePath, "Unk", $"{key}.bin");
 
 				if (ContainsString(data, "proto3") || ContainsString(data, "proto2"))
-					DumpProtoFromBin(data);
+					DumpProtoFromBin(data, Path.Combine(basePath, "Proto"));
 			}
 
 			if (File.Exists(outputPath))
@@ -253,11 +280,44 @@ internal class MainApp
 					config.ProcessAllEntries = true;
 					break;
 
+				case "-l":
+				case "--lang":
+					string[] languages = i + 1 < args.Length
+						? args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+						: [];
+					if (languages.Length == 0)
+					{
+						Console.Error.WriteLine("Error: --lang requires a comma-separated list of languages");
+						return null;
+					}
+					foreach (string language in languages)
+					{
+						string name = language.ToLowerInvariant();
+						if (name == "all")
+						{
+							config.Languages.AddRange(LanguageFolders.Keys);
+						}
+						else if (LanguageFolders.ContainsKey(name))
+						{
+							config.Languages.Add(name);
+						}
+						else
+						{
+							Console.Error.WriteLine($"Error: Unknown language '{language}' (use english, chinese, japanese, korean or all)");
+							return null;
+						}
+					}
+					break;
+
 				default:
 					Console.Error.WriteLine($"Error: Unknown argument '{args[i]}'");
 					return null;
 			}
 		}
+
+		if (config.Languages.Count == 0)
+			config.Languages.Add("english");
+		config.Languages = [.. config.Languages.Distinct()];
 
 		return config;
 	}
@@ -276,14 +336,16 @@ internal class MainApp
 		Console.WriteLine("  -k, --keys <keys>       Comma-separated list of entry keys to process");
 		Console.WriteLine("  -a, --assetbundles      Extract asset bundles (default: skip)");
 		Console.WriteLine("  --all                   Process all entries (ignores key filtering)");
+		Console.WriteLine("  -l, --lang <langs>      Comma-separated table languages: english, chinese, japanese, korean or all (default: english)");
 		Console.WriteLine();
 		Console.WriteLine("Examples:");
 		Console.WriteLine("  StarResonanceTool.exe --pkg \"C:\\game\\meta.pkg\" --output \"C:\\output\"");
 		Console.WriteLine("  StarResonanceTool.exe --keys \"1952927057,2697780389\" --assetbundles");
 		Console.WriteLine("  StarResonanceTool.exe --all --output \"C:\\extracted\"");
+		Console.WriteLine("  StarResonanceTool.exe --all --assetbundles --lang all --output \"C:\\extracted\"");
 	}
 
-	private static void DumpProtoFromBin(byte[] data)
+	private static void DumpProtoFromBin(byte[] data, string outputDir)
 	{
 
 		var logger = new ConsoleLogger();
@@ -291,7 +353,7 @@ internal class MainApp
 		var coreService = new ProtoDescriptorService([], logger);
 		var app = new ProtoDumpService(fileSystem, logger, coreService, coreService);
 
-		app.Run(data, "Proto");
+		app.Run(data, outputDir);
 	}
 
 	private static bool ContainsString(byte[] data, string text)
